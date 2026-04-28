@@ -2,6 +2,7 @@ const express = require('express');
 const { spawn, exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+
 const app = express();
 const PORT = 3456;
 
@@ -11,6 +12,9 @@ const processes = {};
 // 存储每个服务的日志 { name: { lines: [], counter: 0 } }
 const serviceLogs = new Map();
 const MAX_LOG_LINES = 1000;   // 每个服务最多保留多少条日志
+
+// 配置文件路径
+const CONFIG_PATH = path.join(__dirname, 'services.json');
 
 // 辅助函数：向日志存储中添加一条
 function addLogLine(store, text, type) {
@@ -27,12 +31,15 @@ function addLogLine(store, text, type) {
   }
 }
 
-// 配置文件路径
-const CONFIG_PATH = path.join(__dirname, 'services.json');
-
 // 解析 JSON 请求体
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ---------- 辅助函数 ----------
+
+
+
+
 
 // ---------- API ----------
 
@@ -207,6 +214,10 @@ app.post('/api/config', (req, res) => {
     res.status(400).json({ error: err.message });
   }
 });
+
+
+
+
 
 // 启动服务器
 app.listen(PORT, () => {

@@ -1,234 +1,303 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MCP 服务管理器</title>
+  <title>MCP 服务器控制台 // SYS.ADMIN</title>
+  <link rel="stylesheet" href="fonts.css">
   <link rel="stylesheet" href="style.css">
+  <style>
+    [v-cloak] {
+      display: none !important;
+    }
+  </style>
 </head>
+
 <body>
-  <div class="container">
-    <h1>MCP 服务管理器</h1>
-    
-    <div id="services-panel">
-      <h2>当前服务</h2>
-      <div id="service-list"></div>
-      <div class="global-actions">
-        <button id="start-all-btn">全部启动</button>
-        <button id="stop-all-btn">全部停止</button>
-      </div>
+  <div id="app" v-cloak>
+    <!-- 背景特效 -->
+    <div class="bg-effects">
+      <div class="glow-orb orb-1"></div>
+      <div class="glow-orb orb-2"></div>
+      <div class="scanlines"></div>
+      <div class="grid-overlay"></div>
     </div>
 
-    <hr>
-
-    <div id="config-panel">
-      <h2>编辑配置 (services.json) <button id="edit-config-btn">✎ 编辑</button></h2>
-      <div id="config-editor" style="display:none;">
-        <textarea id="config-textarea" rows="15" cols="80"></textarea>
-        <br>
-        <button id="save-config-btn">保存</button>
-        <button id="cancel-config-btn">取消</button>
-      </div>
-      <pre id="config-display"></pre>
-    </div>
-  </div>
-
-  <!-- 日志查看模态框 -->
-  <div id="log-modal" class="modal" style="display:none;">
-    <div class="modal-content">
-      <span class="close-btn">&times;</span>
-      <h3 id="log-modal-title">服务日志</h3>
-      <pre id="log-output"></pre>
-    </div>
-  </div>
-
-  <script>
-    // ---------- 工具函数 ----------
-    async function apiGet(url) {
-      const res = await fetch(url);
-      return res.json();
-    }
-    
-    async function apiPost(url, body) {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-      return res.json();
-    }
-
-    function escapeHtml(text) {
-      const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
-      return String(text).replace(/[&<>"']/g, m => map[m]);
-    }
-
-    // 服务列表渲染
-    async function loadServices() {
-      const data = await apiGet('/api/services');
-      const listDiv = document.getElementById('service-list');
-      if (!data || !data.services) {
-        listDiv.innerHTML = '<p style="color:red">加载失败</p>';
-        return;
-      }
-      listDiv.innerHTML = data.services.map(svc => `
-        <div class="service-row ${svc.running ? 'running' : ''}">
-          <span class="service-name">${escapeHtml(svc.name)}</span>
-          <span class="status-badge ${svc.running ? 'status-on' : 'status-off'}">
-            ${svc.running ? '运行中' : '已停止'}
-          </span>
-          <button class="start-btn" data-name="${escapeHtml(svc.name)}" ${svc.running ? 'disabled' : ''}>启动</button>
-          <button class="stop-btn" data-name="${escapeHtml(svc.name)}" ${svc.running ? '' : 'disabled'}>停止</button>
-          <button class="log-btn" data-name="${escapeHtml(svc.name)}">日志</button>
+    <div class="container">
+      <header class="sys-header">
+        <h1><span class="sys-badge">SYS</span> MCP 服务管理器<span class="blinking-cursor">_</span></h1>
+        <div class="sys-status">
+          <span class="status-dot"></span> SYSTEM ONLINE
         </div>
-      `).join('');
+      </header>
 
-      // 绑定启动/停止按钮事件
-      document.querySelectorAll('.start-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          const name = btn.dataset.name;
+      <!-- 导航标签 -->
+      <div class="tab-navigation">
+        <button :class="['tab-btn', { active: currentTab === 'services' }]" @click="currentTab = 'services'">
+          <span class="tab-icon">[ 01 ]</span> 服务管理
+        </button>
+        <button :class="['tab-btn', { active: currentTab === 'settings' }]" @click="currentTab = 'settings'">
+          <span class="tab-icon">[ 02 ]</span> 系统配置
+        </button>
+      </div>
+
+      <!-- 服务管理面板 -->
+      <div v-show="currentTab === 'services'" class="tab-content active" style="animation: none;">
+        <div class="panel-header">
+          <h2>当前服务终端</h2>
+          <div class="global-actions">
+            <button @click="startAll" class="action-btn">全部启动 :: INIT</button>
+            <button @click="stopAll" class="action-btn">全部停止 :: HALT</button>
+          </div>
+        </div>
+        <div class="service-grid">
+          <div v-if="services.length === 0" class="error-msg">[ERROR] 获取服务数据失败或无服务配置...</div>
+          <div v-for="(svc, index) in services" :key="svc.name" class="service-card"
+            :class="svc.running ? 'running' : 'stopped'" :style="{ animationDelay: (index * 0.1) + 's' }">
+            <div class="card-status-bar"></div>
+            <div class="card-inner">
+              <div class="service-header">
+                <span class="service-name">{{ svc.name }}</span>
+                <span class="status-badge" :class="svc.running ? 'status-on' : 'status-off'">
+                  {{ svc.running ? 'ONLINE' : 'OFFLINE' }}
+                </span>
+              </div>
+              <div class="service-actions">
+                <button class="start-btn" :disabled="svc.running" @click="startService(svc.name)">启动 // START</button>
+                <button class="stop-btn" :disabled="!svc.running" @click="stopService(svc.name)">停止 // STOP</button>
+                <button class="log-btn" @click="openLogModal(svc.name)">日志 // LOGS</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 设置面板 -->
+      <div v-show="currentTab === 'settings'" class="tab-content active" style="animation: none;">
+        <div class="panel-header">
+          <h2>系统配置文件 <span class="dim-text">(services.json)</span></h2>
+          <button v-if="!isEditingConfig" @click="editConfig" class="action-btn edit-btn">编辑配置 :: EDIT</button>
+        </div>
+
+        <div class="config-container">
+          <div v-if="isEditingConfig" class="editor-wrap">
+            <textarea id="config-textarea" v-model="editConfigContent" rows="18" spellcheck="false"></textarea>
+            <div class="editor-actions">
+              <button @click="saveConfig" class="action-btn edit-btn">保存 :: SAVE</button>
+              <button @click="cancelEditConfig" class="action-btn">取消 :: CANCEL</button>
+            </div>
+          </div>
+          <pre v-else id="config-display" class="code-display">{{ configContent }}</pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- 日志查看模态框 -->
+    <div v-show="logModal.visible" class="modal" @click.self="closeLogModal" style="display: block;">
+      <div class="modal-content terminal-window">
+        <div class="terminal-header">
+          <span class="terminal-title">TERMINAL // {{ logModal.serviceName }}.LOG</span>
+          <div class="terminal-controls">
+            <span class="close-btn" @click="closeLogModal">&times;</span>
+          </div>
+        </div>
+        <pre id="log-output" ref="logOutputRef">
+<span class="log-out">&gt;&gt; 建立日志通道连接...</span>
+<span v-for="(line, index) in logModal.lines" :key="index" :class="line.type === 'stderr' ? 'log-err' : 'log-out'">{{ (line.type === 'stderr' ? '[STDERR] ' : '[STDOUT] ') + line.text + '\n' }}</span>
+        </pre>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { createApp, ref, reactive, onMounted, onUnmounted, nextTick } from './vue.esm-browser.js';
+
+    createApp({
+      setup() {
+        const currentTab = ref('services');
+        const services = ref([]);
+        const configContent = ref('');
+        const isEditingConfig = ref(false);
+        const editConfigContent = ref('');
+
+        const logModal = reactive({
+          visible: false,
+          serviceName: '',
+          lines: [],
+          since: -1,
+          timer: null
+        });
+        const logOutputRef = ref(null);
+
+        // ---------- API Utils ----------
+        const apiGet = async (url) => {
+          try {
+            const res = await fetch(url);
+            return await res.json();
+          } catch (e) {
+            console.error(e);
+            return null;
+          }
+        };
+
+        const apiPost = async (url, body) => {
+          try {
+            const res = await fetch(url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: body ? JSON.stringify(body) : undefined
+            });
+            return await res.json();
+          } catch (e) {
+            console.error(e);
+            return { error: e.message };
+          }
+        };
+
+        // ---------- Data Fetching ----------
+        const loadServices = async () => {
+          const data = await apiGet('/api/services');
+          if (data && data.services) {
+            services.value = data.services;
+          }
+        };
+
+        const loadConfig = async () => {
+          const data = await apiGet('/api/config');
+          if (data && data.content) {
+            configContent.value = data.content;
+          } else {
+            configContent.value = '[ERROR] 配置文件未找到或无法读取';
+          }
+        };
+
+        // ---------- Actions ----------
+        const startService = async (name) => {
           await apiPost(`/api/services/${encodeURIComponent(name)}/start`);
-          loadServices();
-        });
-      });
-      document.querySelectorAll('.stop-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          const name = btn.dataset.name;
+          await loadServices();
+        };
+
+        const stopService = async (name) => {
           await apiPost(`/api/services/${encodeURIComponent(name)}/stop`);
+          await loadServices();
+        };
+
+        const startAll = async () => {
+          const promises = services.value
+            .filter(svc => !svc.running)
+            .map(svc => apiPost(`/api/services/${encodeURIComponent(svc.name)}/start`));
+          await Promise.all(promises);
+          await loadServices();
+        };
+
+        const stopAll = async () => {
+          const promises = services.value
+            .filter(svc => svc.running)
+            .map(svc => apiPost(`/api/services/${encodeURIComponent(svc.name)}/stop`));
+          await Promise.all(promises);
+          await loadServices();
+        };
+
+        // ---------- Config Editor ----------
+        const editConfig = () => {
+          editConfigContent.value = configContent.value;
+          isEditingConfig.value = true;
+        };
+
+        const cancelEditConfig = () => {
+          isEditingConfig.value = false;
+        };
+
+        const saveConfig = async () => {
+          const res = await apiPost('/api/config', { content: editConfigContent.value });
+          if (res.success) {
+            alert('配置已完成更新 :: SYSTEM CONFIG SAVED');
+            isEditingConfig.value = false;
+            await loadConfig();
+            await loadServices();
+          } else {
+            alert('保存失败 :: [ERROR] ' + (res.error || '未知错误'));
+          }
+        };
+
+        // ---------- Log Modal ----------
+        const fetchLogs = async () => {
+          if (!logModal.serviceName || !logModal.visible) return;
+          const url = `/api/services/${encodeURIComponent(logModal.serviceName)}/logs?since=${logModal.since}`;
+          const data = await apiGet(url);
+          if (!data) return;
+
+          if (data.lines && data.lines.length > 0) {
+            // Vue 特性：数组 push 并使其响应
+            logModal.lines.push(...data.lines);
+            logModal.since = data.nextSince;
+            nextTick(() => {
+              if (logOutputRef.value) {
+                logOutputRef.value.scrollTop = logOutputRef.value.scrollHeight;
+              }
+            });
+          }
+        };
+
+        const openLogModal = (name) => {
+          logModal.serviceName = name;
+          logModal.since = -1;
+          logModal.lines = [];
+          logModal.visible = true;
+
+          fetchLogs();
+          if (logModal.timer) clearInterval(logModal.timer);
+          logModal.timer = setInterval(fetchLogs, 2000);
+        };
+
+        const closeLogModal = () => {
+          if (logModal.timer) {
+            clearInterval(logModal.timer);
+            logModal.timer = null;
+          }
+          logModal.visible = false;
+          logModal.serviceName = '';
+        };
+
+        // ---------- Lifecycle ----------
+        let pollTimer = null;
+        onMounted(() => {
           loadServices();
+          loadConfig();
+          pollTimer = setInterval(loadServices, 3000);
         });
-      });
 
-      // 绑定日志按钮事件
-      document.querySelectorAll('.log-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const name = btn.dataset.name;
-          openLogModal(name);
+        onUnmounted(() => {
+          if (pollTimer) clearInterval(pollTimer);
+          if (logModal.timer) clearInterval(logModal.timer);
         });
-      });
-    }
 
-    // ---------- 全部启动/停止 ----------
-    document.getElementById('start-all-btn').addEventListener('click', async () => {
-      const data = await apiGet('/api/services');
-      if (!data || !data.services) return;
-      for (const svc of data.services) {
-        if (!svc.running) {
-          await apiPost(`/api/services/${encodeURIComponent(svc.name)}/start`);
-        }
+        // Expose variables and functions to template
+        return {
+          currentTab,
+          services,
+          configContent,
+          isEditingConfig,
+          editConfigContent,
+          logModal,
+          logOutputRef,
+
+          startService,
+          stopService,
+          startAll,
+          stopAll,
+
+          editConfig,
+          cancelEditConfig,
+          saveConfig,
+
+          openLogModal,
+          closeLogModal
+        };
       }
-      loadServices();
-    });
-
-    document.getElementById('stop-all-btn').addEventListener('click', async () => {
-      const data = await apiGet('/api/services');
-      if (!data || !data.services) return;
-      for (const svc of data.services) {
-        if (svc.running) {
-          await apiPost(`/api/services/${encodeURIComponent(svc.name)}/stop`);
-        }
-      }
-      loadServices();
-    });
-
-    // ---------- 配置编辑 ----------
-    async function loadConfigDisplay() {
-      const data = await apiGet('/api/config');
-      if (data && data.content) {
-        document.getElementById('config-display').textContent = data.content;
-        document.getElementById('config-textarea').value = data.content;
-      } else {
-        document.getElementById('config-display').textContent = '加载失败';
-      }
-    }
-
-    document.getElementById('edit-config-btn').addEventListener('click', () => {
-      document.getElementById('config-editor').style.display = 'block';
-      document.getElementById('config-display').style.display = 'none';
-      document.getElementById('edit-config-btn').style.display = 'none';
-    });
-
-    document.getElementById('cancel-config-btn').addEventListener('click', () => {
-      document.getElementById('config-editor').style.display = 'none';
-      document.getElementById('config-display').style.display = 'block';
-      document.getElementById('edit-config-btn').style.display = 'inline-block';
-      loadConfigDisplay();
-    });
-
-    document.getElementById('save-config-btn').addEventListener('click', async () => {
-      const newContent = document.getElementById('config-textarea').value;
-      const res = await apiPost('/api/config', { content: newContent });
-      if (res.success) {
-        alert('配置已保存！');
-        document.getElementById('config-editor').style.display = 'none';
-        document.getElementById('config-display').style.display = 'block';
-        document.getElementById('edit-config-btn').style.display = 'inline-block';
-        loadConfigDisplay();
-        loadServices();
-      } else {
-        alert('保存失败：' + (res.error || '未知错误'));
-      }
-    });
-
-    // ---------- 日志模态框 ----------
-    const logModal = document.getElementById('log-modal');
-    const logTitle = document.getElementById('log-modal-title');
-    const logOutput = document.getElementById('log-output');
-    const closeBtn = document.querySelector('#log-modal .close-btn');
-    let logPollTimer = null;
-    let currentServiceName = null;
-    let currentSince = -1;
-
-    function openLogModal(name) {
-      currentServiceName = name;
-      currentSince = -1;           // 从头获取
-      logTitle.textContent = `日志 - ${name}`;
-      logOutput.textContent = ''; // 清空
-      logModal.style.display = 'block';
-      // 立即拉取一次，然后启动定时轮询
-      fetchLogs();
-      logPollTimer = setInterval(fetchLogs, 2000);
-    }
-
-    function closeLogModal() {
-      if (logPollTimer) {
-        clearInterval(logPollTimer);
-        logPollTimer = null;
-      }
-      logModal.style.display = 'none';
-      currentServiceName = null;
-    }
-
-    async function fetchLogs() {
-      if (!currentServiceName) return;
-      const url = `/api/services/${encodeURIComponent(currentServiceName)}/logs?since=${currentSince}`;
-      const data = await apiGet(url);
-      if (!data) return;
-
-      // 追加每一行日志
-      for (const line of data.lines) {
-        const prefix = line.type === 'stderr' ? '[STDERR] ' : '';
-        logOutput.textContent += prefix + line.text;
-      }
-      // 自动滚动到底部
-      logOutput.scrollTop = logOutput.scrollHeight;
-      // 更新 since 索引
-      currentSince = data.nextSince;
-    }
-
-    // 关闭按钮
-    closeBtn.addEventListener('click', closeLogModal);
-    // 点击模态框背景也可关闭
-    window.addEventListener('click', (e) => {
-      if (e.target === logModal) {
-        closeLogModal();
-      }
-    });
-
-    // ---------- 初始化 ----------
-    loadServices();
-    loadConfigDisplay();
-    setInterval(loadServices, 3000);
+    }).mount('#app');
   </script>
 </body>
+
 </html>
