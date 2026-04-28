@@ -1,0 +1,18 @@
+{
+  "services": [
+    {
+      "name": "Lanhu MCP",
+      "workdir": "D:/MyMcp/lanhu-mcp",
+      "command": "D:/MyMcp/lanhu-mcp/.venv/Scripts/python.exe",
+      "args": ["lanhu_mcp_server.py"],
+      "useShell": false
+    },
+    {
+      "name": "Context7 MCP",
+      "workdir": "D:/MyMcp/context7",
+      "command": "pnpm",
+      "args": ["run", "start:mcp"],
+      "useShell": true
+    }
+  ]
+}

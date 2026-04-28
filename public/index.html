@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MCP 服务管理器</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <h1>MCP 服务管理器</h1>
+    
+    <div id="services-panel">
+      <h2>当前服务</h2>
+      <div id="service-list"></div>
+      <div class="global-actions">
+        <button id="start-all-btn">全部启动</button>
+        <button id="stop-all-btn">全部停止</button>
+      </div>
+    </div>
+
+    <hr>
+
+    <div id="config-panel">
+      <h2>编辑配置 (services.json) <button id="edit-config-btn">✎ 编辑</button></h2>
+      <div id="config-editor" style="display:none;">
+        <textarea id="config-textarea" rows="15" cols="80"></textarea>
+        <br>
+        <button id="save-config-btn">保存</button>
+        <button id="cancel-config-btn">取消</button>
+      </div>
+      <pre id="config-display"></pre>
+    </div>
+  </div>
+
+  <!-- 日志查看模态框 -->
+  <div id="log-modal" class="modal" style="display:none;">
+    <div class="modal-content">
+      <span class="close-btn">&times;</span>
+      <h3 id="log-modal-title">服务日志</h3>
+      <pre id="log-output"></pre>
+    </div>
+  </div>
+
+  <script>
+    // ---------- 工具函数 ----------
+    async function apiGet(url) {
+      const res = await fetch(url);
+      return res.json();
+    }
+    
+    async function apiPost(url, body) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      return res.json();
+    }
+
+    function escapeHtml(text) {
+      const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+      return String(text).replace(/[&<>"']/g, m => map[m]);
+    }
+
+    // 服务列表渲染
+    async function loadServices() {
+      const data = await apiGet('/api/services');
+      const listDiv = document.getElementById('service-list');
+      if (!data || !data.services) {
+        listDiv.innerHTML = '<p style="color:red">加载失败</p>';
+        return;
+      }
+      listDiv.innerHTML = data.services.map(svc => `
+        <div class="service-row ${svc.running ? 'running' : ''}">
+          <span class="service-name">${escapeHtml(svc.name)}</span>
+          <span class="status-badge ${svc.running ? 'status-on' : 'status-off'}">
+            ${svc.running ? '运行中' : '已停止'}
+          </span>
+          <button class="start-btn" data-name="${escapeHtml(svc.name)}" ${svc.running ? 'disabled' : ''}>启动</button>
+          <button class="stop-btn" data-name="${escapeHtml(svc.name)}" ${svc.running ? '' : 'disabled'}>停止</button>
+          <button class="log-btn" data-name="${escapeHtml(svc.name)}">日志</button>
+        </div>
+      `).join('');
+
+      // 绑定启动/停止按钮事件
+      document.querySelectorAll('.start-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const name = btn.dataset.name;
+          await apiPost(`/api/services/${encodeURIComponent(name)}/start`);
+          loadServices();
+        });
+      });
+      document.querySelectorAll('.stop-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const name = btn.dataset.name;
+          await apiPost(`/api/services/${encodeURIComponent(name)}/stop`);
+          loadServices();
+        });
+      });
+
+      // 绑定日志按钮事件
+      document.querySelectorAll('.log-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const name = btn.dataset.name;
+          openLogModal(name);
+        });
+      });
+    }
+
+    // ---------- 全部启动/停止 ----------
+    document.getElementById('start-all-btn').addEventListener('click', async () => {
+      const data = await apiGet('/api/services');
+      if (!data || !data.services) return;
+      for (const svc of data.services) {
+        if (!svc.running) {
+          await apiPost(`/api/services/${encodeURIComponent(svc.name)}/start`);
+        }
+      }
+      loadServices();
+    });
+
+    document.getElementById('stop-all-btn').addEventListener('click', async () => {
+      const data = await apiGet('/api/services');
+      if (!data || !data.services) return;
+      for (const svc of data.services) {
+        if (svc.running) {
+          await apiPost(`/api/services/${encodeURIComponent(svc.name)}/stop`);
+        }
+      }
+      loadServices();
+    });
+
+    // ---------- 配置编辑 ----------
+    async function loadConfigDisplay() {
+      const data = await apiGet('/api/config');
+      if (data && data.content) {
+        document.getElementById('config-display').textContent = data.content;
+        document.getElementById('config-textarea').value = data.content;
+      } else {
+        document.getElementById('config-display').textContent = '加载失败';
+      }
+    }
+
+    document.getElementById('edit-config-btn').addEventListener('click', () => {
+      document.getElementById('config-editor').style.display = 'block';
+      document.getElementById('config-display').style.display = 'none';
+      document.getElementById('edit-config-btn').style.display = 'none';
+    });
+
+    document.getElementById('cancel-config-btn').addEventListener('click', () => {
+      document.getElementById('config-editor').style.display = 'none';
+      document.getElementById('config-display').style.display = 'block';
+      document.getElementById('edit-config-btn').style.display = 'inline-block';
+      loadConfigDisplay();
+    });
+
+    document.getElementById('save-config-btn').addEventListener('click', async () => {
+      const newContent = document.getElementById('config-textarea').value;
+      const res = await apiPost('/api/config', { content: newContent });
+      if (res.success) {
+        alert('配置已保存！');
+        document.getElementById('config-editor').style.display = 'none';
+        document.getElementById('config-display').style.display = 'block';
+        document.getElementById('edit-config-btn').style.display = 'inline-block';
+        loadConfigDisplay();
+        loadServices();
+      } else {
+        alert('保存失败：' + (res.error || '未知错误'));
+      }
+    });
+
+    // ---------- 日志模态框 ----------
+    const logModal = document.getElementById('log-modal');
+    const logTitle = document.getElementById('log-modal-title');
+    const logOutput = document.getElementById('log-output');
+    const closeBtn = document.querySelector('#log-modal .close-btn');
+    let logPollTimer = null;
+    let currentServiceName = null;
+    let currentSince = -1;
+
+    function openLogModal(name) {
+      currentServiceName = name;
+      currentSince = -1;           // 从头获取
+      logTitle.textContent = `日志 - ${name}`;
+      logOutput.textContent = ''; // 清空
+      logModal.style.display = 'block';
+      // 立即拉取一次，然后启动定时轮询
+      fetchLogs();
+      logPollTimer = setInterval(fetchLogs, 2000);
+    }
+
+    function closeLogModal() {
+      if (logPollTimer) {
+        clearInterval(logPollTimer);
+        logPollTimer = null;
+      }
+      logModal.style.display = 'none';
+      currentServiceName = null;
+    }
+
+    async function fetchLogs() {
+      if (!currentServiceName) return;
+      const url = `/api/services/${encodeURIComponent(currentServiceName)}/logs?since=${currentSince}`;
+      const data = await apiGet(url);
+      if (!data) return;
+
+      // 追加每一行日志
+      for (const line of data.lines) {
+        const prefix = line.type === 'stderr' ? '[STDERR] ' : '';
+        logOutput.textContent += prefix + line.text;
+      }
+      // 自动滚动到底部
+      logOutput.scrollTop = logOutput.scrollHeight;
+      // 更新 since 索引
+      currentSince = data.nextSince;
+    }
+
+    // 关闭按钮
+    closeBtn.addEventListener('click', closeLogModal);
+    // 点击模态框背景也可关闭
+    window.addEventListener('click', (e) => {
+      if (e.target === logModal) {
+        closeLogModal();
+      }
+    });
+
+    // ---------- 初始化 ----------
+    loadServices();
+    loadConfigDisplay();
+    setInterval(loadServices, 3000);
+  </script>
+</body>
+</html>
